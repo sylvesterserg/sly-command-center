@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Build Your First Production-Style Homelab — SLY</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0B0B0B;color:rgba(255,255,255,.82);font-family:"DM Sans","Inter",system-ui,sans-serif;line-height:1.65}
+.wrap{max-width:680px;margin:0 auto;padding:48px 20px 80px}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.14em;color:#C9A84C;text-transform:uppercase}
+h1{color:#fff;font-size:30px;line-height:1.2;margin:48px 0 16px;font-weight:700}
+h2{color:#fff;font-size:22px;margin:40px 0 12px}
+h3{color:#fff;font-size:17px}
+p{color:rgba(255,255,255,.75)}
+a{color:#C9A84C}
+strong{color:#fff}
+em{color:rgba(255,255,255,.6)}
+hr{border:0;border-top:1px solid rgba(201,168,76,.25);margin:36px 0}
+code{background:#171717;color:#C9A84C;padding:2px 6px;border-radius:4px;font-size:.88em}
+pre{background:#121212;border:1px solid rgba(201,168,76,.18);padding:16px;border-radius:10px;overflow-x:auto}
+pre code{background:none;color:rgba(255,255,255,.85);padding:0}
+table{border-collapse:collapse;width:100%;margin:16px 0;font-size:14px}
+th{background:#171717;color:#C9A84C;text-align:left;padding:10px;border:1px solid #222}
+td{padding:10px;border:1px solid #222;color:rgba(255,255,255,.78)}
+ul,ol{color:rgba(255,255,255,.78);padding-left:22px}
+li{margin:6px 0}
+input[type=checkbox]{accent-color:#C0272D;width:16px;height:16px;vertical-align:-2px;margin-right:8px;cursor:pointer}
+footer{margin-top:56px;padding-top:24px;border-top:1px solid rgba(201,168,76,.25);font-size:13px}
+.bar{height:4px;background:linear-gradient(90deg,#C9A84C,#7A5F25)}
+</style>
+</head>
+<body>
+<div class="bar"></div>
+<div style="max-width:680px;margin:0 auto;padding:28px 20px 0">
+<div class="eyebrow">SLY · Free Guide</div>
+<div style="color:#fff;font-family:Georgia,serif;font-size:28px;margin-top:8px">SLY <span style="color:#C9A84C">/</span> Build. Automate. <span style="color:#C9A84C">Own Your Infrastructure.</span></div>
+</div>
+<div class="wrap">
+<h1>Build Your First Production-Style Homelab</h1>
+<p><strong>By Sylvester (SLY) — Linux · Infrastructure · Homelab · Automation · Practical AI</strong></p>
+<p><em>Guide V1 · October 2026 · Read time ~12 min · Weekend build</em></p>
+<p><strong>Build. Automate. Own Your Infrastructure.</strong></p>
+<p>This is the guide I wish I had on day one. It mirrors my live lab — Proxmox VE 9.2.5 on a single node called "sly" with 11 guests — distilled into a build order you can finish in a weekend and run like production.</p>
+<p><strong>Production-style means:</strong> documented IPs, HTTPS everywhere internally, a separate backup target, monitoring that actually alerts, and a restore you have actually tested. If it isn't backed up and monitored, it isn't "done."</p>
+<h2>Who this is for</h2>
+<ul>
+<li>
+<p><strong>IT pros and helpdesk → sysadmins</strong> who want a lab that teaches production habits, not just "it boots."</p>
+</li>
+<li>
+<p><strong>Homelab beginners</strong> with one mini PC or old desktop and a managed-switch budget.</p>
+</li>
+<li>
+<p><strong>Small-business owners</strong> evaluating self-hosted tools before paying per-seat SaaS for everything.</p>
+</li>
+</ul>
+<hr />
+<h2>1. Reference architecture — one node, done right</h2>
+<p>Start with <strong>one Proxmox node</strong>. One node done cleanly beats three nodes done messy, every time. You can add a second node later for clustering / HA — the layout below does not paint you into a corner.</p>
+<ul>
+<li>
+<p><strong>Edge:</strong> Your ISP router (or OPNsense later) → a NETGEAR GS108Ev3-class managed switch. VLAN-capable from day one, even if you start flat.</p>
+</li>
+<li>
+<p><strong>Compute:</strong> Proxmox VE host ("sly" in my lab). Mini PC with an SSD for VMs/LXCs. Runs templates, the Docker host, DNS, proxy, and monitoring.</p>
+</li>
+<li>
+<p><strong>Storage + power:</strong> A QNAP TS-216G-class 2-bay NAS as backup target and shared storage, plus an APC BR1500MS2-class UPS so blips are non-events and shutdowns are clean.</p>
+</li>
+</ul>
+<p><strong>Traffic flow:</strong> Devices → switch → Proxmox services (AdGuard for DNS, Nginx Proxy Manager for HTTPS) → Tailscale for remote access. No port-forwards to the internet for admin panels. Ever.</p>
+<p><strong>My live proof:</strong> This is the same layout behind my Homelab Command Center build log — 11 guests on one node: a services LXC running Docker, a Portainer agent, networking/DNS, Vaultwarden, Firefly III, WordPress + MariaDB, templates, and more.</p>
+<hr />
+<h2>2. Hardware baseline — spend where it matters</h2>
+<p>You don't need enterprise gear. You need <strong>quiet, low-power, reliable</strong> — because this will run 24/7 in your home or office.</p>
+<table>
+<thead>
+<tr>
+<th>Piece</th>
+<th>Minimum viable</th>
+<th>What I run</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Compute</td>
+<td>Mini PC / SFF, 4-core, 16 GB RAM</td>
+<td>Dell OptiPlex 7070 Micro, i5-9500T</td>
+</tr>
+<tr>
+<td>Switch</td>
+<td>8-port managed, VLAN-capable</td>
+<td>NETGEAR GS108Ev3</td>
+</tr>
+<tr>
+<td>Backup target</td>
+<td>External drive or NAS</td>
+<td>QNAP TS-216G 2-bay NAS</td>
+</tr>
+<tr>
+<td>Power</td>
+<td>UPS with USB signalling</td>
+<td>APC BR1500MS2</td>
+</tr>
+<tr>
+<td>Rack (optional)</td>
+<td>Small shelf to start</td>
+<td>RackPath 9U</td>
+</tr>
+</tbody>
+</table>
+<p>Notes: 32 GB RAM is recommended on the compute node. The NAS sits separate from the host SSD in the 3-2-1 layout (Section 6). The UPS is non-negotiable — it rides out blips and gives guests a clean shutdown on an extended outage.</p>
+<p><strong>Budget order if you are buying piecemeal:</strong> UPS first (it protects everything), then compute + RAM, then the managed switch, then the NAS. A pretty rack with no UPS is a liability with good cable management.</p>
+<hr />
+<h2>3. Proxmox layout — templates, guests, storage</h2>
+<h3>Install and first 30 minutes</h3>
+<ul>
+<li>Install Proxmox VE from ISO, set a static IP on your management network, and write it down. Tape on the box counts as documentation if you also put it in a note.</li>
+<li>Switch apt to the no-subscription repo if this is a lab, run full updates, reboot.</li>
+<li>Storage: local SSD = local-lvm (LVM-thin) or ZFS for VM disks. <strong>Backups never live only on the same disk as the VMs.</strong></li>
+<li>Add your NAS as NFS/SMB storage for backups.</li>
+<li>Set up email / webhook notifications under Datacenter → Notifications so host alerts leave the box.</li>
+</ul>
+<h3>The golden template — do this before any "real" VM</h3>
+<ul>
+<li>Install <strong>Rocky Linux 9</strong> minimal, apply all updates, install <code>qemu-guest-agent</code> + cloud-init, set timezone / locale / admin user.</li>
+<li>Clean machine-id and SSH host keys, then convert to template. Name it like <code>rocky9-golden-2026-10</code> — future-you will thank present-you.</li>
+<li>Every Linux VM from now on is a <strong>clone</strong> of this. Consistent, fast, repeatable — the same habit you'd want in a client environment.</li>
+</ul>
+<h3>Guest plan (single-node starter)</h3>
+<table>
+<thead>
+<tr>
+<th>Guest</th>
+<th>Type</th>
+<th>Job</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>docker-host</td>
+<td>LXC or VM</td>
+<td>Docker services via Portainer</td>
+</tr>
+<tr>
+<td>net-services</td>
+<td>LXC / VM</td>
+<td>AdGuard Home + Nginx Proxy Manager</td>
+</tr>
+<tr>
+<td>monitoring</td>
+<td>LXC (co-locate early)</td>
+<td>Uptime Kuma + Homepage dashboard</td>
+</tr>
+<tr>
+<td>templates</td>
+<td>Template</td>
+<td>Rocky 9 golden image</td>
+</tr>
+</tbody>
+</table>
+<p>One Docker host to start — don't shard prematurely. Give the Docker host the most RAM; keep everything else lean (1–2 vCPU, 1–2 GB to start). Proxmox makes resizing easy — undocumented over-provisioning makes troubleshooting miserable.</p>
+<hr />
+<h2>4. Networking — DNS, VLAN thinking, remote access</h2>
+<ul>
+<li><strong>DNS filtering:</strong> Run <strong>AdGuard Home</strong> as your network DNS and point your router's DHCP DNS at it. You get ad/tracker blocking plus a query log that teaches you more about your network in a week than a month of guessing.</li>
+<li><strong>VLAN thinking (even if day one is flat):</strong> Plan three zones — <strong>Trusted</strong> (PCs / servers), <strong>IoT</strong> (TVs, bulbs, cameras), <strong>Guest</strong>. Implement on the managed switch + router when ready. The plan is free; retrofitting without a plan is not.</li>
+<li><strong>Remote access:</strong> <strong>Tailscale</strong> on the Proxmox host + key services. It punches through CGNAT, needs no port-forwards, and gives you named, ACL'd access.</li>
+<li><strong>HTTPS everywhere:</strong> Nginx Proxy Manager in front of every web UI, with real certs (Let's Encrypt via Cloudflare DNS challenge if you own a domain). <code>vault.yourdomain.com</code> beats <code>192.168.1.47:8080</code> in every way that matters.</li>
+<li><strong>Document as you go:</strong> Keep one page (Wiki.js, Notion, or a Markdown file) with: IP plan, guest list, credentials location (Vaultwarden — not a sticky note), backup schedule, restore-test dates. In production, documentation <strong>is</strong> the system.</li>
+</ul>
+<hr />
+<h2>5. The starter stack — what to run first</h2>
+<p>Install in this order. Each piece makes the next one easier.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Service</th>
+<th>Why first</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Portainer</td>
+<td>Manage Docker without living in the CLI</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Nginx Proxy Manager</td>
+<td>One place for hostnames + SSL</td>
+</tr>
+<tr>
+<td>3</td>
+<td>AdGuard Home</td>
+<td>Network DNS + filtering, instant win</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Vaultwarden</td>
+<td>Self-hosted vault for lab credentials</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Uptime Kuma + Homepage</td>
+<td>Monitoring + dashboard</td>
+</tr>
+<tr>
+<td>6</td>
+<td>One "real" service</td>
+<td>Firefly III, Wiki.js, or WordPress</td>
+</tr>
+</tbody>
+</table>
+<p>Portainer is a safety net — you will still learn the CLI. Every later service gets a clean URL on day one thanks to the proxy. Your lab credentials need a real home immediately (Vaultwarden). Pick the one "real" service you will actually use weekly — usage is what turns a lab into a skill.</p>
+<h3>Container rules (production habits, homelab scale)</h3>
+<ul>
+<li>One Compose file per service, named volumes, <code>.env</code> for secrets — <strong>never secrets in git</strong>.</li>
+<li>Pin image versions (<code>image: service:1.2.3</code>) and update deliberately. "Latest broke at 2am" is a rite of passage you only need once.</li>
+<li>Every Compose file lives in version control (without secrets). If the host dies, redeploy = clone repo + <code>docker compose up -d</code>.</li>
+</ul>
+<hr />
+<h2>6. Backups that restore — 3-2-1 or it didn't happen</h2>
+<p><strong>3 copies, 2 different media, 1 offsite/offline.</strong> In this layout: live VMs (copy 1) → NAS via Proxmox backup (copy 2) → offsite / offline copy (copy 3 — a cloud bucket or a rotated external drive).</p>
+<ul>
+<li><strong>Schedule:</strong> Nightly, incremental-friendly backups; retain 7 daily + 4 weekly. Databases (MariaDB etc.) get logical dumps too — VM snapshots alone are not a database backup strategy.</li>
+<li><strong>Monthly restore test (the whole point):</strong> Pick one VM, restore it to a test ID, boot it, log in, verify the service. Log the date and the result. <strong>An untested backup is a hope, not a backup.</strong></li>
+<li><strong>Config backups:</strong> Compose files, Proxmox config notes, router/switch exports. Rebuilding hardware is annoying; rebuilding undocumented config is a lost weekend.</li>
+</ul>
+<p><strong>This is also a Sylvect service for a reason:</strong> most small businesses I meet "have backups." Almost none have a dated, successful restore test. If reading this made you nervous about your business systems, see "Work with me" at the end — the Backup &amp; Recovery Check exists for exactly that.</p>
+<hr />
+<h2>7. Security baseline — 30 minutes, huge payoff</h2>
+<ul>
+<li>Unique admin passwords in Vaultwarden + 2FA on Proxmox and your registrar / Cloudflare.</li>
+<li>SSH keys only, no password SSH on guests; updates on a cadence (weekly for the lab, planned windows for anything client-facing).</li>
+<li>No admin UIs exposed to the internet — Tailscale or VPN only. The reverse proxy gets HTTPS + strong auth for anything sensitive.</li>
+<li>UPS monitored (NUT or the vendor tool) so guests shut down cleanly before the battery dies.</li>
+</ul>
+<hr />
+<h2>8. The weekend build order</h2>
+<h3>Day 1 — Foundation: Proxmox + template + Docker</h3>
+<ol>
+<li>Install Proxmox, static IP, updates, storage + NAS backup target.</li>
+<li>Build the Rocky 9 golden template (updates, guest agent, cloud-init).</li>
+<li>Clone the Docker host, install Docker + Portainer.</li>
+<li>Deploy Nginx Proxy Manager — first hostname + cert working.</li>
+</ol>
+<h3>Day 2 — Services + safety: DNS, monitoring, backups</h3>
+<ol>
+<li>AdGuard Home live, router DNS pointed at it.</li>
+<li>Tailscale on host + phone, remote login proven.</li>
+<li>Vaultwarden + Uptime Kuma + Homepage up.</li>
+<li>First backup job runs <strong>and one restore test passes</strong> — then you're done.</li>
+</ol>
+<p><strong>What to skip for now:</strong> Kubernetes, HA clustering, Ceph, a second node "for later," and any service you can't name a weekly use for. Depth on one node teaches you more than breadth across five half-finished systems.</p>
+<h3>Common first-month mistakes (so you can skip them)</h3>
+<ul>
+<li>Backups on the same disk as the VMs — that's one copy with extra steps.</li>
+<li>Port-forwarding Proxmox / Portainer to the internet "temporarily" — it never is.</li>
+<li>Twelve services, zero monitoring; first alert = a family member saying "the internet is down."</li>
+<li>No IP / credential documentation until "later" — later is doing it from memory at midnight.</li>
+</ul>
+<hr />
+<h2>9. Starter checklist</h2>
+<p>Work top to bottom. This is the same checklist as the interactive version on the guide page.</p>
+<ul>
+<li>[ ] <strong>Hardware ready</strong> — mini PC (16–32 GB RAM), managed switch, UPS on the desk.</li>
+<li>[ ] <strong>Proxmox installed</strong> — static IP, updates done, NAS added as backup storage.</li>
+<li>[ ] <strong>Golden template built</strong> — Rocky 9, guest agent + cloud-init, cloned once successfully.</li>
+<li>[ ] <strong>Docker host live</strong> — Portainer up, Nginx Proxy Manager issuing real HTTPS certs.</li>
+<li>[ ] <strong>DNS + remote access</strong> — AdGuard serving the network, Tailscale login proven from your phone.</li>
+<li>[ ] <strong>Core stack up</strong> — Vaultwarden, Uptime Kuma, Homepage, and one real service you use weekly.</li>
+<li>[ ] <strong>Backups + restore test</strong> — nightly job running, one VM restored and verified, date logged.</li>
+<li>[ ] <strong>Documented</strong> — IP plan, guest list, credential locations, and restore dates on one page.</li>
+</ul>
+<hr />
+<h2>The gear this actually runs on</h2>
+<p>These are the exact units in my lab. Prices and availability change — check the listing for current details.</p>
+<ul>
+<li><strong>Dell OptiPlex 7070 Micro · i5-9500T</strong> — the Proxmox workhorse. Small, quiet, sips power. https://amzn.to/4hT4Vks</li>
+<li><strong>NETGEAR GS108Ev3 managed switch</strong> — VLANs and clean segmentation without enterprise pricing. https://amzn.to/3TXJ42b</li>
+<li><strong>APC BR1500MS2 UPS</strong> — rides out blips, clean shutdown on extended outages. https://amzn.to/4rDFg2n</li>
+<li><strong>QNAP TS-216G NAS</strong> — backup target + shared storage in the 3-2-1 layout. https://amzn.to/46LVBIX</li>
+<li><strong>RackPath 9U rack</strong> — keeps switch, node, UPS, and cables tidy once you grow. https://amzn.to/4da6ms2</li>
+</ul>
+<p><strong>Disclosure:</strong> Gear links are Amazon Associates links (tag: slateenterpri-20). I only list hardware that actually runs in my lab. If you buy through a link, it supports the builds at no extra cost to you.</p>
+<p><strong>Software I live in:</strong> Proxmox VE · Rocky Linux · Docker / Portainer · n8n · Tailscale · Cloudflare · Wiki.js · Vaultwarden.</p>
+<hr />
+<h2>Where to go next</h2>
+<p>The lab on my page is this guide, lived in — Command Center dashboard, n8n automations, Wiki.js knowledge base, AI agents. Build the foundation this weekend, then pick <strong>one</strong> project track and go deep.</p>
+<p>When you're ready for the templates version of everything above (Compose files, backup checklists, layout worksheets), join the newsletter — <strong>template drops go to subscribers first.</strong> The AI-Assisted IT Engineer Playbook lands there first too.</p>
+<ul>
+<li><strong>Newsletter / build logs:</strong> https://slybuilds.substack.com — see it in practice: "I Built a Command Center for My Entire Homelab" — https://slybuilds.substack.com/p/i-built-a-command-center-for-my-entire</li>
+<li><strong>Threads (personal):</strong> https://www.threads.com/@sergeant_sly</li>
+<li><strong>Threads (business):</strong> https://www.threads.com/@sylvect_it_solutions</li>
+<li><strong>Sylvect IT Services:</strong> https://sylvect.biz/</li>
+</ul>
+<h2>Want this built for your business?</h2>
+<p>Everything above, productized — fixed-scope project packages for NJ / NYC small businesses (Sylvect IT Services):</p>
+<ul>
+<li><strong>Backup &amp; Recovery Check — from $500.</strong> Audit your backups, run a real restore test, fix the gaps.</li>
+<li><strong>Linux Server Cleanup — from $600.</strong> Updates, services, logs, security basics, clean bill of health.</li>
+<li><strong>App Deployment &amp; Handoff — from $750.</strong> Server, proxy, SSL, backups, and a handoff doc your team can follow.</li>
+<li><strong>Workflow Automation Build — from $1,500.</strong> One painful manual workflow, automated end-to-end and documented.</li>
+</ul>
+<p>Details: https://sylvect.biz/</p>
+<hr />
+<p><em>Guide V1 · October 2026 · Based on the live "sly" Proxmox lab. Found an error or want a topic expanded? Reply on Threads @sergeant_sly — reader fixes ship in V1.1.</em></p>
+<footer>
+<strong style="color:#fff">Get the next build:</strong> <a href="https://slybuilds.substack.com">slybuilds.substack.com</a><br>
+<strong style="color:#fff">Work with Sylvect:</strong> <a href="https://sylvect.biz">sylvect.biz</a><br><br>
+<span style="color:rgba(255,255,255,.5)">As an Amazon Associate I earn from qualifying purchases. Gear links in this guide support the lab at no extra cost to you.</span>
+</footer>
+</div>
+<script>
+document.querySelectorAll('li').forEach(function(li){
+  var cb=li.querySelector('input[type=checkbox]');
+  if(cb){ cb.disabled=false;
+    var key='guide:'+li.textContent.trim().slice(0,60);
+    cb.checked=localStorage.getItem(key)==='1';
+    cb.addEventListener('change',function(){ localStorage.setItem(key, cb.checked ? '1' : '0'); });
+  }});
+</script>
+</body>
+</html>
